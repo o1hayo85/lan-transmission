@@ -1,0 +1,52 @@
+.device-item {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  padding: 12px 8px !important;
+}
+
+.device-item .ant-list-item-meta {
+  display: none !important;
+}
+
+.device-content {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.device-info {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  flex: 1 1 auto !important;
+  min-width: 80px !important;
+}
+
+.device-name {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: #333 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: block !important;
+  min-width: 60px !important;
+}
+
+.device-ip {
+  font-size: 12px !important;
+  color: #999 !important;
+  white-space: nowrap !important;
+  display: block !important;
+}
+
+.device-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-shrink: 0 !important;
+}

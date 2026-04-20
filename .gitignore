@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Tauri
+src-tauri/Cargo.lock
+src-tauri/WixTools/
+
+# SQLite database
+*.db
+*.db-journal
+
+# Claude Code
+.claude/
+*.claude.md
