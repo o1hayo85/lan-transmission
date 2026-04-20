@@ -8,6 +8,7 @@ use tokio::io::{AsyncWriteExt, AsyncSeekExt, SeekFrom};
 use tauri::{Emitter, Manager};
 
 use super::http_server::AppState;
+use super::http_server::is_transfer_cancelled;
 
 /// 处理文件上传（支持断点续传）
 pub async fn handle_upload(
@@ -56,11 +57,24 @@ pub async fn handle_upload(
         }
     }
 
+    // 检查传输是否已取消
+    if is_transfer_cancelled(&state, &transfer_id).await {
+        return Json(serde_json::json!({
+            "success": false,
+            "message": "传输已取消",
+            "file_id": file_id,
+            "transfer_id": transfer_id
+        }));
+    }
+
     // 获取保存路径
     let save_path = {
         let paths = state.save_paths.lock().await;
         paths.get(&transfer_id).cloned().unwrap_or_default()
     };
+
+    // 实际保存的文件路径
+    let mut actual_file_path: Option<String> = None;
 
     // 写入文件
     if let Some(data) = file_data {
@@ -84,6 +98,8 @@ pub async fn handle_upload(
             std::fs::create_dir_all(parent).unwrap_or(());
         }
 
+        actual_file_path = Some(file_path.to_string_lossy().to_string());
+
         // 断点续传：追加写入或从头写入
         let mut file = if offset > 0 && file_path.exists() {
             // 断点续传模式：追加写入
@@ -105,12 +121,34 @@ pub async fn handle_upload(
     // 总接收大小 = 断点位置 + 本次接收大小
     let total_received = offset + received_size;
 
-    // 发送进度更新事件到前端
-    let _ = state.app_handle.emit("upload-progress", serde_json::json!({
-        "transfer_id": transfer_id,
-        "file_id": file_id,
-        "received_size": total_received
-    }));
+    println!("文件上传完成: transfer_id={}, file_id={}, file_name={}, received_size={}", transfer_id, file_id, file_name, total_received);
+
+    // 保存文件记录到数据库（首次上传时）
+    if offset == 0 && actual_file_path.is_some() {
+        let conn = crate::history::database::get_connection(&state.app_handle);
+        crate::history::database::add_file_record(
+            &conn,
+            &file_id,
+            &transfer_id,
+            &file_name,
+            actual_file_path.as_deref(),
+            total_received,
+            None,  // md5
+            "received",
+        );
+    }
+
+    // 发送进度更新事件到前端（通过window发送）
+    if let Some(window) = state.app_handle.get_webview_window("main") {
+        let emit_result = window.emit("upload-progress", serde_json::json!({
+            "transfer_id": transfer_id,
+            "file_id": file_id,
+            "received_size": total_received
+        }));
+        println!("upload-progress事件发送结果: {:?}", emit_result);
+    } else {
+        println!("未找到main window，无法发送upload-progress事件");
+    }
 
     Json(serde_json::json!({
         "success": true,

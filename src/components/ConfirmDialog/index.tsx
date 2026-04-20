@@ -1,14 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Modal, Button, List, Typography, Space, message, Input } from 'antd'
 import { FolderOpenOutlined } from '@ant-design/icons'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
-import axios from 'axios'
 import { useTransferStore } from '../../stores/transferStore'
-import { FileInfo } from '../../types'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 const { Text } = Typography
+
+// 后端发送的文件信息格式
+interface BackendFileInfo {
+  file_id: string
+  name: string
+  size: number
+  file_type: string
+  relative_path?: string
+}
 
 interface IncomingRequest {
   transfer_id: string
@@ -16,21 +24,41 @@ interface IncomingRequest {
   sender_name: string
   sender_ip: string
   sender_port: number
-  files: FileInfo[]
+  files: BackendFileInfo[]
   total_size: number
+}
+
+interface SendTransferResult {
+  success: boolean
+  message: string
 }
 
 function ConfirmDialog() {
   const [currentRequest, setCurrentRequest] = useState<IncomingRequest | null>(null)
   const [savePath, setSavePath] = useState<string>('')
   const { addTransfer } = useTransferStore()
+  const { defaultSavePath, loadSettings, validatePath } = useSettingsStore()
 
-  // 监听传输请求事件
+  // 使用 ref 跟踪最新的 defaultSavePath，避免竞态条件
+  const defaultSavePathRef = useRef(defaultSavePath)
+
+  // 更新 ref 值
+  useEffect(() => {
+    defaultSavePathRef.current = defaultSavePath
+  }, [defaultSavePath])
+
+  // 加载默认保存路径设置
+  useEffect(() => {
+    loadSettings()
+  }, [loadSettings])
+
+  // 监听传输请求事件（只设置一次，使用 ref 获取最新值）
   useEffect(() => {
     const unlisten = listen<IncomingRequest>('transfer-request', (event) => {
+      console.log('收到传输请求:', event.payload)
       setCurrentRequest(event.payload)
-      // 默认保存路径为空，用户需要选择
-      setSavePath('')
+      // 使用 ref 获取最新的默认保存路径
+      setSavePath(defaultSavePathRef.current)
     })
 
     return () => {
@@ -68,17 +96,55 @@ function ConfirmDialog() {
       return
     }
 
+    // 验证保存路径有效性
+    const validation = await validatePath(savePath)
+    if (!validation.valid) {
+      message.error(`保存路径无效: ${validation.error}`)
+      return
+    }
+
     try {
+      // 首先在本地存储save_path（接收方的HTTP服务器需要这个路径来保存文件）
+      const localResult = await invoke<SendTransferResult>('save_transfer_path_locally', {
+        transferId: currentRequest.transfer_id,
+        savePath: savePath
+      })
+
+      if (!localResult.success) {
+        message.error(`本地存储路径失败: ${localResult.message}`)
+        return
+      }
+
+      // 保存传输记录到数据库（必须先保存，否则上传时文件记录的外键约束会失败）
+      await invoke('save_transfer_record', {
+        id: currentRequest.transfer_id,
+        direction: 'receive',
+        peerDeviceId: currentRequest.sender_id,
+        peerDeviceName: currentRequest.sender_name,
+        peerIp: currentRequest.sender_ip,
+        totalSize: currentRequest.total_size
+      })
+
       // 获取本机IP作为接收方IP
       const myIp = await invoke<string>('get_local_ip')
 
-      // 发送接受请求到发送方，包含接收方地址信息
-      await axios.post(`http://${currentRequest.sender_ip}:${currentRequest.sender_port}/api/transfer/accept`, {
-        transfer_id: currentRequest.transfer_id,
-        save_path: savePath,
-        receiver_ip: myIp,
-        receiver_port: 8080
+      // 获取动态HTTP端口
+      const httpPort = await invoke<number>('get_http_port')
+
+      // 使用后端命令发送接受请求到发送方
+      const result = await invoke<SendTransferResult>('send_accept_request', {
+        senderIp: currentRequest.sender_ip,
+        senderPort: currentRequest.sender_port,
+        transferId: currentRequest.transfer_id,
+        savePath: savePath,
+        receiverIp: myIp,
+        receiverPort: httpPort
       })
+
+      if (!result.success) {
+        message.error(`接受请求失败: ${result.message}`)
+        return
+      }
 
       // 创建传输记录
       addTransfer({
@@ -89,13 +155,19 @@ function ConfirmDialog() {
         peerDeviceName: currentRequest.sender_name,
         totalSize: currentRequest.total_size,
         transferredSize: 0,
-        files: currentRequest.files,
+        files: currentRequest.files.map(f => ({
+          id: f.file_id,
+          name: f.name,
+          size: f.size,
+          type: f.file_type
+        })),
         createdAt: Date.now()
       })
 
       message.success('已接受传输请求，文件将保存到: ' + savePath)
       setCurrentRequest(null)
     } catch (error) {
+      console.error('接受传输请求失败:', error)
       message.error('接受传输请求失败')
     }
   }
@@ -104,8 +176,11 @@ function ConfirmDialog() {
     if (!currentRequest) return
 
     try {
-      await axios.post(`http://${currentRequest.sender_ip}:${currentRequest.sender_port}/api/transfer/reject`, {
-        transfer_id: currentRequest.transfer_id
+      // 使用后端命令发送拒绝请求
+      await invoke<SendTransferResult>('send_reject_request', {
+        senderIp: currentRequest.sender_ip,
+        senderPort: currentRequest.sender_port,
+        transferId: currentRequest.transfer_id
       })
     } catch (error) {
       // 忽略拒绝失败

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { Layout, Menu, Button } from 'antd'
-import { MenuFoldOutlined, MenuUnfoldOutlined, SendOutlined, HistoryOutlined } from '@ant-design/icons'
+import { MenuFoldOutlined, MenuUnfoldOutlined, SendOutlined, HistoryOutlined, SettingOutlined } from '@ant-design/icons'
 import Home from './pages/Home'
 import History from './pages/History'
+import Settings from './pages/Settings'
 import UploadHandler from './components/UploadHandler'
 import ReceiveHandler from './components/ReceiveHandler'
 import './App.css'
@@ -52,6 +53,12 @@ function AppContent() {
               icon: <HistoryOutlined />,
               title: '传输历史'
             },
+            {
+              key: '/settings',
+              label: collapsed ? '' : '设置',
+              icon: <SettingOutlined />,
+              title: '设置'
+            },
           ]}
         />
       </Sider>
@@ -68,6 +75,7 @@ function AppContent() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/history" element={<History />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </Content>
       </Layout>

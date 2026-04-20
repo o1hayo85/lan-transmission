@@ -1,11 +1,9 @@
-import { useState } from 'react'
-import { Button, List, Space, message, Select, Spin } from 'antd'
-import { InboxOutlined, SendOutlined, DeleteOutlined, FolderOpenOutlined, FileAddOutlined } from '@ant-design/icons'
+import { useState, useEffect } from 'react'
+import { Button, List, Space, message, Spin } from 'antd'
+import { InboxOutlined, FolderOpenOutlined, FileAddOutlined, DeleteOutlined } from '@ant-design/icons'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
-import { useDeviceStore } from '../../stores/deviceStore'
-import { useTransferStore } from '../../stores/transferStore'
-import { sendTransferRequest } from '../../services/transfer'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 
 interface FileEntry {
   id: string
@@ -16,7 +14,7 @@ interface FileEntry {
   is_dir: boolean
 }
 
-interface SelectedItem {
+export interface SelectedItem {
   id: string
   name: string
   path: string
@@ -25,13 +23,66 @@ interface SelectedItem {
   isFolder?: boolean
 }
 
-function FileDropZone() {
-  const { devices } = useDeviceStore()
-  const { addTransfer } = useTransferStore()
-  const [fileList, setFileList] = useState<SelectedItem[]>([])
-  const [selectedDevice, setSelectedDevice] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
+interface FileDropZoneProps {
+  fileList: SelectedItem[]
+  onFileListChange: (files: SelectedItem[]) => void
+}
+
+function FileDropZone({ fileList, onFileListChange }: FileDropZoneProps) {
   const [loading, setLoading] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+
+  // 监听Tauri 2.x拖拽事件
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === 'over') {
+        setIsDragging(true)
+      } else if (event.payload.type === 'drop') {
+        setIsDragging(false)
+        const paths = event.payload.paths
+        if (paths.length > 0) {
+          setLoading(true)
+          const newFiles: SelectedItem[] = []
+
+          for (const path of paths) {
+            const name = path.split(/[\\/]/).pop() || 'unknown'
+            invoke<number>('get_file_size', { filePath: path }).then(size => {
+              newFiles.push({
+                id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name,
+                path,
+                size,
+              })
+              // 最后一个文件处理完后更新列表
+              if (newFiles.length === paths.length) {
+                onFileListChange([...fileList, ...newFiles])
+                setLoading(false)
+              }
+            }).catch(() => {
+              // 获取文件大小失败时使用0
+              newFiles.push({
+                id: `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name,
+                path,
+                size: 0,
+              })
+              if (newFiles.length === paths.length) {
+                onFileListChange([...fileList, ...newFiles])
+                setLoading(false)
+              }
+            })
+          }
+        }
+      } else {
+        // 'cancel' type
+        setIsDragging(false)
+      }
+    })
+
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [fileList, onFileListChange])
 
   // 计算总大小
   const totalSize = fileList.reduce((sum, f) => sum + f.size, 0)
@@ -67,7 +118,7 @@ function FileDropZone() {
           })
         }
 
-        setFileList(prev => [...prev, ...newFiles])
+        onFileListChange([...fileList, ...newFiles])
         setLoading(false)
       }
     } catch (error) {
@@ -103,7 +154,7 @@ function FileDropZone() {
 
         if (selectedFiles.length > 0) {
           // 添加一个文件夹标记项
-          setFileList(prev => [...prev, {
+          onFileListChange([...fileList, {
             id: `folder_${Date.now()}`,
             name: `${folderName} (${selectedFiles.length} 个文件)`,
             path: folderPath,
@@ -122,88 +173,31 @@ function FileDropZone() {
     }
   }
 
-  // 发送文件
-  const handleSend = async () => {
-    if (!selectedDevice) {
-      message.warning('请先选择目标设备')
-      return
-    }
-    if (fileList.length === 0) {
-      message.warning('请先选择要发送的文件')
-      return
-    }
-
-    const device = devices.find(d => d.id === selectedDevice)
-    if (!device) {
-      message.error('目标设备不存在')
-      return
-    }
-
-    setSending(true)
-
-    try {
-      // 获取本机IP
-      const myIp = await invoke<string>('get_local_ip')
-
-      // 过滤掉文件夹标记项，只发送实际文件
-      const actualFiles = fileList.filter(f => !f.isFolder)
-
-      // 构建文件信息列表
-      const files = actualFiles.map(f => ({
-        file_id: f.id,
-        name: f.name,
-        size: f.size,
-        file_type: 'application/octet-stream',
-        relative_path: f.relativePath,
-        file_path: f.path,
-      }))
-
-      const actualTotalSize = actualFiles.reduce((sum, f) => sum + f.size, 0)
-
-      // 发送传输请求
-      const result = await sendTransferRequest(device, files, actualTotalSize, myIp)
-
-      if (result.success && result.transferId) {
-        message.success('传输请求已发送，等待对方确认')
-
-        // 创建传输记录
-        addTransfer({
-          id: result.transferId,
-          direction: 'send',
-          status: 'waiting_accept',
-          peerDeviceId: device.id,
-          peerDeviceName: device.name,
-          totalSize: actualTotalSize,
-          transferredSize: 0,
-          files: files as any,
-          createdAt: Date.now()
-        })
-
-        // 清空文件列表
-        setFileList([])
-      } else {
-        message.error('发送传输请求失败: ' + (result.error || '未知错误'))
-      }
-    } catch (error: any) {
-      message.error('获取本机IP失败: ' + error.message)
-    }
-
-    setSending(false)
-  }
-
   // 清空文件列表
   const handleClear = () => {
-    setFileList([])
+    onFileListChange([])
   }
 
   // 显示列表（合并文件夹项和文件项，最多显示5个）
   const displayList = fileList.slice(0, 5)
+  const actualFileCount = fileList.filter(f => !f.isFolder).length
 
   return (
     <div>
-      <div style={{ padding: '40px 0', textAlign: 'center', border: '1px dashed #d9d9d9', borderRadius: 8, background: '#fafafa' }}>
-        <InboxOutlined style={{ fontSize: 48, color: '#1890ff' }} />
-        <p style={{ marginTop: 16, color: '#666' }}>点击下方按钮选择文件</p>
+      <div
+        style={{
+          padding: '40px 0',
+          textAlign: 'center',
+          border: isDragging ? '2px dashed #1890ff' : '1px dashed #d9d9d9',
+          borderRadius: 8,
+          background: isDragging ? '#e6f7ff' : '#fafafa',
+          transition: 'all 0.2s ease'
+        }}
+      >
+        <InboxOutlined style={{ fontSize: 48, color: isDragging ? '#1890ff' : '#999' }} />
+        <p style={{ marginTop: 16, color: '#666' }}>
+          {isDragging ? '放开即可添加文件' : '拖拽文件到这里或点击下方按钮选择'}
+        </p>
       </div>
 
       <div style={{ marginTop: 16, textAlign: 'center' }}>
@@ -219,7 +213,14 @@ function FileDropZone() {
       {fileList.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <List
-            header={`已选择 ${fileList.filter(f => !f.isFolder).length} 个文件，总大小: ${formatSize(totalSize)}`}
+            header={
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <span>已选择 {actualFileCount} 个文件，总大小: {formatSize(totalSize)}</span>
+                <Button icon={<DeleteOutlined />} size="small" onClick={handleClear}>
+                  清空
+                </Button>
+              </Space>
+            }
             dataSource={displayList}
             renderItem={(file) => (
               <List.Item>
@@ -237,33 +238,6 @@ function FileDropZone() {
               )
             }
           />
-
-          <Space style={{ marginTop: 16, width: '100%', justifyContent: 'space-between' }}>
-            <Select
-              placeholder="选择目标设备"
-              style={{ width: 200 }}
-              value={selectedDevice}
-              onChange={setSelectedDevice}
-              options={devices
-                .filter(d => d.isOnline)
-                .map(d => ({ value: d.id, label: `${d.name} (${d.ip})` }))
-              }
-            />
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              loading={sending}
-              onClick={handleSend}
-            >
-              发送文件
-            </Button>
-            <Button
-              icon={<DeleteOutlined />}
-              onClick={handleClear}
-            >
-              清空
-            </Button>
-          </Space>
         </div>
       )}
     </div>

@@ -12,11 +12,11 @@ interface DiscoveryMessage {
 }
 
 export function useDeviceDiscovery() {
-  const { addDevice, removeDevice, setDevices } = useDeviceStore()
+  const { addDevice, removeDevice } = useDeviceStore()
 
   useEffect(() => {
     // 监听设备发现事件
-    const unlisten = listen<DiscoveryMessage>('device-discovered', (event) => {
+    const unlistenDiscovered = listen<DiscoveryMessage>('device-discovered', (event) => {
       const msg = event.payload
       if (msg.msg_type === 'announce' || msg.msg_type === 'response') {
         addDevice({
@@ -32,9 +32,15 @@ export function useDeviceDiscovery() {
       }
     })
 
+    // 监听设备离线事件（来自超时检测）
+    const unlistenLost = listen<string>('device-lost', (event) => {
+      removeDevice(event.payload)
+    })
+
     // 清理监听
     return () => {
-      unlisten.then((fn) => fn())
+      unlistenDiscovered.then((fn) => fn())
+      unlistenLost.then((fn) => fn())
     }
-  }, [addDevice, removeDevice, setDevices])
+  }, [addDevice, removeDevice])
 }

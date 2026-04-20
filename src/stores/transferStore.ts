@@ -7,6 +7,7 @@ interface TransferState {
   pendingRequests: TransferRecord[]
   setTransfers: (transfers: TransferRecord[]) => void
   addTransfer: (transfer: TransferRecord) => void
+  removeTransfer: (transferId: string) => void
   updateTransferStatus: (transferId: string, status: TransferStatus) => void
   updateTransferProgress: (transferId: string, transferredSize: number) => void
   setCurrentTransfer: (transfer: TransferRecord | null) => void
@@ -21,6 +22,9 @@ export const useTransferStore = create<TransferState>((set) => ({
   setTransfers: (transfers) => set({ transfers }),
   addTransfer: (transfer) => set((state) => ({
     transfers: [...state.transfers, transfer]
+  })),
+  removeTransfer: (transferId) => set((state) => ({
+    transfers: state.transfers.filter(t => t.id !== transferId)
   })),
   updateTransferStatus: (transferId, status) => set((state) => ({
     transfers: state.transfers.map(t => t.id === transferId ? { ...t, status } : t)

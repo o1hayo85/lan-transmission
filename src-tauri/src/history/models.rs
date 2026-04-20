@@ -6,6 +6,7 @@ pub struct TransferRecord {
     pub status: String,
     pub peer_device_id: String,
     pub peer_device_name: String,
+    pub peer_ip: Option<String>,
     pub total_size: u64,
     pub transferred_size: u64,
     pub created_at: i64,
@@ -20,6 +21,7 @@ pub struct FileRecord {
     pub name: String,
     pub path: Option<String>,
     pub size: u64,
+    pub md5: Option<String>,
     pub status: String,
     pub created_at: i64,
 }

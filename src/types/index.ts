@@ -15,6 +15,8 @@ export interface FileInfo {
   size: number
   type: string
   relativePath?: string
+  filePath?: string  // 文件完整路径（发送方使用）
+  md5?: string  // 文件MD5校验值
 }
 
 // 传输请求
@@ -40,6 +42,7 @@ export interface TransferRecord {
   status: TransferStatus
   peerDeviceId: string
   peerDeviceName: string
+  peerIp?: string  // 对方设备IP
   totalSize: number
   transferredSize: number
   files: FileInfo[]

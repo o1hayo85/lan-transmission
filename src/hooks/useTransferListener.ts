@@ -6,7 +6,7 @@ import { message } from 'antd'
 
 export function useTransferListener() {
   const { devices } = useDeviceStore()
-  const { transfers, updateTransferStatus, updateTransferProgress } = useTransferStore()
+  const { transfers, updateTransferStatus, updateTransferProgress, removeTransfer } = useTransferStore()
 
   useEffect(() => {
     // 监听传输开始事件（接收方接受了请求）
@@ -47,6 +47,13 @@ export function useTransferListener() {
       message.info('对方拒绝了传输请求')
     })
 
+    // 监听传输取消事件
+    const unlistenCancelled = listen<string>('transfer-cancelled', (event) => {
+      const transferId = event.payload
+      updateTransferStatus(transferId, 'cancelled')
+      message.info('传输已取消')
+    })
+
     // 监听上传进度事件
     const unlistenProgress = listen<{ transfer_id: string; received_size: number }>('upload-progress', (event) => {
       const { transfer_id, received_size } = event.payload
@@ -56,7 +63,8 @@ export function useTransferListener() {
     return () => {
       unlistenStarted.then((fn) => fn())
       unlistenRejected.then((fn) => fn())
+      unlistenCancelled.then((fn) => fn())
       unlistenProgress.then((fn) => fn())
     }
-  }, [transfers, devices, updateTransferStatus, updateTransferProgress])
+  }, [transfers, devices, updateTransferStatus, updateTransferProgress, removeTransfer])
 }
